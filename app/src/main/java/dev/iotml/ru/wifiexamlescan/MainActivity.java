@@ -30,7 +30,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onClick(View v) {
                 Log.i("wifi", "wifi start");
-
+                //если нажали на кнопку то создадим сканер вифи
                 WiFiScanner wifi=new WiFiScanner(MainActivity.this);
                 wifi.create_scan();
 

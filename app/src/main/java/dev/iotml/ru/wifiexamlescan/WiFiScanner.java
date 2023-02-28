@@ -15,6 +15,8 @@ import android.net.wifi.ScanResult;
 import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiManager;
 import android.net.wifi.WifiNetworkSpecifier;
+import android.net.wifi.WifiNetworkSuggestion;
+import android.net.wifi.hotspot2.PasspointConfiguration;
 import android.os.Build;
 import android.os.PatternMatcher;
 import android.util.Log;
@@ -24,12 +26,13 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.RequiresApi;
 import androidx.core.app.ActivityCompat;
 
+import java.util.ArrayList;
 import java.util.List;
 
 //@RequiresApi(api = Build.VERSION_CODES.Q)
 public class WiFiScanner {
     private Context context;//доступ к контексту
-    Activity activity;//ждоступ к активити
+    Activity activity;      //доступ к активити
     private static final int MY_LOCATION_PERMISSION_REQUEST = 45;
     private static final String TAG = "WiFI";
     //конструктор класса для получения контекста
@@ -37,7 +40,7 @@ public class WiFiScanner {
         this.context = context;
     }
     private WifiManager wifimanager;//менеджер вифи сетей
-    private WifiConfiguration wifiConfig;
+    private WifiConfiguration wifiConfig;//знастройки вифи
 /*
     final NetworkSpecifier specifier =
             new WifiNetworkSpecifier.Builder()
@@ -96,7 +99,7 @@ public class WiFiScanner {
                 result=false;
             }
         }
-        Log.i(TAG, "Request permission: "+permission_string + "is granted: "+result);
+        Log.i(TAG, "Request permission: "+permission_string + " is granted: "+result);
         return result;
     }
 
@@ -139,30 +142,107 @@ public class WiFiScanner {
         for (int i =0;i<results.size();i++)
         {
             Log.i(TAG, "Wireles "+String.valueOf(i)+": "+String.valueOf(results.get(i).SSID));
-            if (results.get(i).SSID.contains("IoTmanager") ){
+            //if (results.get(i).SSID.contains("IoTmanager") ){
+            if (results.get(i).SSID.contains("RSHB_WI-FI") ){
                 //connectivityManager.requestNetwork(request, networkCallback);
-                //connctToWifi(results.get(i).SSID);
+                connectToWifi2(results.get(i).SSID);
             }
         }
     }
 
-    public void connctToWifi(String ssid){
+    public void connectToWifi(String ssid){
         Log.i(TAG, "Wireles connect to  "+ssid);
-        wifiConfig.SSID = ssid;
-        wifiConfig.priority = 1;
-        wifiConfig.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.NONE);
-        wifiConfig.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.TKIP);
-        wifiConfig.allowedAuthAlgorithms.set(WifiConfiguration.AuthAlgorithm.OPEN);
-        wifiConfig.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.NONE);
-        wifiConfig.status = WifiConfiguration.Status.ENABLED;
+        if (!checkPermission(Manifest.permission.CHANGE_NETWORK_STATE)){//проверим разрешения
+            Log.i(TAG, "No permissions CHANGE_NETWORK_STATE");
+            return;}
+        if (!checkPermission(Manifest.permission.WRITE_SETTINGS)){//проверим разрешения
+            Log.i(TAG, "No permissions WRITE_SETTINGS");
+            //return;
+        }
 
-        //получаем ID сети и пытаемся к ней подключиться,
-        int netId = wifimanager.addNetwork(wifiConfig);
-        wifimanager.saveConfiguration();
-        //если вайфай выключен то включаем его
-        wifimanager.enableNetwork(netId, true);
-        //если же он включен но подключен к другой сети то перегружаем вайфай.
-        wifimanager.reconnect();
+        NetworkSpecifier specifier = null;
+        NetworkRequest request = null;
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            specifier = new WifiNetworkSpecifier.Builder()
+                    .setSsidPattern(new PatternMatcher(ssid, PatternMatcher.PATTERN_PREFIX))
+                    //.setBssidPattern(MacAddress.fromString("10:03:23:00:00:00"), MacAddress.fromString("ff:ff:ff:00:00:00"))
+                    .build();
+            request = new NetworkRequest.Builder()
+                    .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                    .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .setNetworkSpecifier(specifier)
+                    .build();
 
+        }
+
+        final ConnectivityManager connectivityManager = (ConnectivityManager)
+                context.getSystemService(Context.CONNECTIVITY_SERVICE);
+
+        final ConnectivityManager.NetworkCallback networkCallback = new ConnectivityManager.NetworkCallback() {
+
+
+            public void onAvailable() {
+                // do success processing here..
+            }
+
+            @Override
+            public void onUnavailable() {
+                // do failure processing here..
+            }
+
+        };
+        connectivityManager.requestNetwork(request, networkCallback);
+
+// Release the request when done.
+        connectivityManager.unregisterNetworkCallback(networkCallback);
+
+    }
+
+    public void connectToWifi2(String ssid) {
+        Log.i(TAG, "Wireles connect to  " + ssid);
+        if (!checkPermission(Manifest.permission.CHANGE_NETWORK_STATE)) {//проверим разрешения
+            Log.i(TAG, "No permissions CHANGE_NETWORK_STATE");
+            return;
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+
+
+            final WifiNetworkSuggestion suggestion1 =
+                    new WifiNetworkSuggestion.Builder()
+                            .setSsid(ssid)
+                            .setIsAppInteractionRequired(true) // Optional (Needs location permission)
+                            .build();
+
+
+
+            final List<WifiNetworkSuggestion> suggestionsList =
+                    new ArrayList<WifiNetworkSuggestion>();
+            suggestionsList.add(suggestion1);
+
+
+            final WifiManager wifiManager =wifimanager;
+                    //(WifiManager) context.getSystemService(Context.WIFI_SERVICE);
+
+            final int status = wifiManager.addNetworkSuggestions(suggestionsList);
+            if (status != WifiManager.STATUS_NETWORK_SUGGESTIONS_SUCCESS) {
+// do error handling here…
+            }
+
+// Optional (Wait for post connection broadcast to one of your suggestions)
+            final IntentFilter intentFilter =
+                    new IntentFilter(WifiManager.ACTION_WIFI_NETWORK_SUGGESTION_POST_CONNECTION);
+
+            final BroadcastReceiver broadcastReceiver = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    if (!intent.getAction().equals(
+                            WifiManager.ACTION_WIFI_NETWORK_SUGGESTION_POST_CONNECTION)) {
+                        return;
+                    }
+                    // do post connect processing here...
+                }
+            };
+            context.registerReceiver(broadcastReceiver, intentFilter);
+        }
     }
 }
