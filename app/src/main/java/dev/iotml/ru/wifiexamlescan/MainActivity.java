@@ -37,7 +37,8 @@ public class MainActivity extends AppCompatActivity {
                 Log.i("wifi", "wifi start");
                 //если нажали на кнопку то создадим сканер вифи
                 WiFiScanner wifi=new WiFiScanner(MainActivity.this);
-                wifi.create_scan();
+                //wifi.startActivity();
+                wifi.create_finder_wifi("IoTmanager");
 
             }
         });
