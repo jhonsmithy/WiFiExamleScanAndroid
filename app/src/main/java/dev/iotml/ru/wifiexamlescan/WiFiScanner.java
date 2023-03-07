@@ -24,6 +24,7 @@ import android.net.wifi.WifiNetworkSuggestion;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.PatternMatcher;
+import android.os.PersistableBundle;
 import android.provider.Settings;
 import android.util.Log;
 import android.Manifest;
@@ -96,7 +97,7 @@ public class WiFiScanner extends Activity {
     }
 
     //проверки или запрос разрешения на изменение системных настроек
-    private boolean checkSystemWritePermission(Context context) {
+    private boolean checkSystemWritePermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if(Settings.System.canWrite(context))
                 return true;
@@ -127,7 +128,10 @@ public class WiFiScanner extends Activity {
         } catch (Exception e) {
             Log.i(TAG, "Check location service error: "+e.toString());
         }
-        return buildAlertMessageNoLocationService(geolocationEnabled);
+        geolocationEnabled=explainMessage(geolocationEnabled,
+                                context.getResources().getString(R.string.msg_switch_gps),
+                                android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS);
+        return geolocationEnabled;
     }
 
     //Проверяет включены ли вифи сервисы
@@ -140,20 +144,22 @@ public class WiFiScanner extends Activity {
             Log.i(TAG, "Check WiFi service error: "+e.toString());
         }
 
-
         if (!wifiStateEnabled)    //если вифи выключен
             if (Build.VERSION.SDK_INT<Build.VERSION_CODES.Q)
                 wifimanager.setWifiEnabled(true);//для старых версий включить
             else
             {//для новых версий запросить вклюяение
-                openPermissionsMenu(Settings.Panel.ACTION_WIFI);
+                wifiStateEnabled = explainMessage(wifiStateEnabled,
+                        context.getResources().getString(R.string.msg_switch_wifi),
+                        android.provider.Settings.Panel.ACTION_WIFI);
             }
-            return true;
+        return wifiStateEnabled;
     }
-    //Показываем диалог и переводим пользователя к настройкам геолокации
-    private boolean buildAlertMessageNoLocationService(boolean network_enabled) {
-        String msg = !network_enabled ? context.getResources().getString(R.string.msg_switch_network) : null;
 
+    //Показываем диалог и переводим пользователя к настройкам геолокации
+    private boolean explainMessage(boolean network_enabled, String msg_show_text, String action_settings) {
+        String msg = !network_enabled ? msg_show_text : null;
+        final boolean[] fl = {false};
         if (msg != null) {
             final AlertDialog.Builder builder = new AlertDialog.Builder(context);
             builder.setCancelable(false)
@@ -161,58 +167,40 @@ public class WiFiScanner extends Activity {
                     .setPositiveButton("Включить", new DialogInterface.OnClickListener() {
                         public void onClick(@SuppressWarnings("unused") final DialogInterface dialog, @SuppressWarnings("unused") final int id) {
                             //context.startActivity(new Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS));
-                            openPermissionsMenu(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS);
+                            openPermissionsMenu(action_settings);
+                            fl[0] =true;
                         }
                     })
                     .setNegativeButton("Отмена",new DialogInterface.OnClickListener() {
                         public void onClick(@SuppressWarnings("unused") final DialogInterface dialog, @SuppressWarnings("unused") final int id) {
-                            showToast("Не включил");
-                }
+                            return false;
+                                    }
             });
 
             final AlertDialog alert = builder.create();
             alert.show();
-            return true;
         }
         return false;
     }
 
-    public void create_finder_wifi(String find_ssid)  //создадим сканер сетей
+    //создадим сканер сетей
+    public void create_finder_wifi(String find_ssid)
     {
         ssid_wifi_connect=find_ssid;
 
         if (!checkPermission(Manifest.permission.CHANGE_WIFI_STATE)){//проверим разрешения
             showToast("Нет доступа к WiFi");
+
             return;}
 
-
         if (this.context!=null) {//еслти контекст не нулевой
-
-            Log.i(TAG, "WiFi "+ checkWiFiServiceEnabled());
-            /*
-            wifimanager = (WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-
-            if (!wifimanager.isWifiEnabled())    //если вифи выключен
-            if (Build.VERSION.SDK_INT<Build.VERSION_CODES.Q)
-                wifimanager.setWifiEnabled(true);//для старых версий включить
-            else
-            {//для новых версий запросить вклюяение
-                openPermissionsMenu(Settings.Panel.ACTION_WIFI);
-            }
-            Log.i(TAG, "GPS "+ checkLocationServiceEnabled());
-            /*if (!checkLocationServiceEnabled())       //если гпс выключен
-            {
-                openAndroidPermissionsMenu(context,Settings.ACTION_LOCATION_SOURCE_SETTINGS);
-            } */
-
-
             IntentFilter intentFilter = new IntentFilter();//создадим фильтр
             intentFilter.addAction(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION);
             context.registerReceiver(wifiScanReceiver, intentFilter);//включим слушатель на этот фильтр
             // создаем новый объект для подключения к конкретной точке
             wifiConfig = new WifiConfiguration();
             //запуск сканирования
-            boolean success = wifimanager.startScan();
+            Log.i(TAG, "Scanner WiFi is created: "+wifimanager.startScan());
         }
         else Log.i(TAG, "Context application is null");
 
@@ -384,13 +372,12 @@ public class WiFiScanner extends Activity {
         }
     }
 
-
-    @Override
-    protected void onCreate(@Nullable Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        Log.i(TAG, "check");
-        showToast("check");
-        checkLocationServiceEnabled();//проверить включение
+    public void onCreate() {
+        //проверить включение
+        Log.i(TAG, "Check GPS toogle: "+checkLocationServiceEnabled());
+        Log.i(TAG, "Check WiFi toogle: "+checkWiFiServiceEnabled());
+        //checkSystemWritePermission
+        //        checkPermission
     }
 
     @Override
@@ -404,7 +391,14 @@ public class WiFiScanner extends Activity {
     }
 
     @Override
-    protected void onStop() {
+    public void onStart() {
+        super.onStart();
+
+    }
+
+
+    @Override
+    public void onStop() {
         super.onStop();
         unregisterReceiver(wifiScanReceiver);
     }
