@@ -1,5 +1,5 @@
 <resources>
     <string name="app_name">WiFi Examle Scan</string>
-    <string name="msg_switch_gps">Необходимо включить червисы определения местоположения </string>
+    <string name="msg_switch_gps">Необходимо включить сервисы определения местоположения </string>
     <string name="msg_switch_wifi">Необходимо включить сервис доступа к беспроводным сетям</string>
 </resources>

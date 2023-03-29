@@ -1,6 +1,5 @@
 package dev.iotml.ru.wifiexamlescan;
 
-import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
@@ -20,25 +19,16 @@ import android.net.wifi.ScanResult;
 import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiManager;
 import android.net.wifi.WifiNetworkSpecifier;
-import android.net.wifi.WifiNetworkSuggestion;
 import android.os.Build;
-import android.os.Bundle;
 import android.os.PatternMatcher;
-import android.os.PersistableBundle;
 import android.provider.Settings;
 import android.util.Log;
 import android.Manifest;
 import android.view.Gravity;
 import android.widget.Toast;
-
 import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 import androidx.core.app.ActivityCompat;
-
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -57,6 +47,18 @@ public class WiFiScanner extends Activity {
     private LocationManager locationManager;
     public static boolean geolocationEnabled = false;//статус включения сервисов месторасположения
     public static boolean wifiStateEnabled=false; //статус включения сервисов вифи
+    public List<ScanResult> wifiListResult; //список сканированных сетей
+
+    // создаем колбек и его метод
+    interface NetworkFindCallback{
+        void enableConnectWifi();
+    }
+
+    NetworkFindCallback callback;
+
+    public void registerCallBack(NetworkFindCallback callback){
+        this.callback = callback;
+    }
 
     //конструктор класса для получения контекста
     public WiFiScanner(Context context) {
@@ -128,9 +130,10 @@ public class WiFiScanner extends Activity {
         } catch (Exception e) {
             Log.i(TAG, "Check location service error: "+e.toString());
         }
-        geolocationEnabled=explainMessage(geolocationEnabled,
-                                context.getResources().getString(R.string.msg_switch_gps),
-                                android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS);
+        if (!geolocationEnabled){
+            explainMessage(context.getResources().getString(R.string.msg_switch_gps),
+                    android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS);
+        }
         return geolocationEnabled;
     }
 
@@ -138,7 +141,7 @@ public class WiFiScanner extends Activity {
     private boolean checkWiFiServiceEnabled(){
         wifiStateEnabled=false;
         wifimanager = (WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-        try {
+        try {//проверяем включен ли сервис вифи
             wifiStateEnabled = wifimanager.isWifiEnabled();
         } catch (Exception e){
             Log.i(TAG, "Check WiFi service error: "+e.toString());
@@ -149,48 +152,70 @@ public class WiFiScanner extends Activity {
                 wifimanager.setWifiEnabled(true);//для старых версий включить
             else
             {//для новых версий запросить вклюяение
-                wifiStateEnabled = explainMessage(wifiStateEnabled,
+                //заапустить слушатель на вкл вифи
+                IntentFilter intentFilter = new IntentFilter();//создадим фильтр
+                intentFilter.addAction(WifiManager.WIFI_STATE_CHANGED_ACTION);
+                context.registerReceiver(wifiStateReceiver, intentFilter);//включим слушатель на этот фильтр
+                //высветим сообщение о необходимости включения
+                explainMessage(
                         context.getResources().getString(R.string.msg_switch_wifi),
                         android.provider.Settings.Panel.ACTION_WIFI);
             }
         return wifiStateEnabled;
     }
 
-    //Показываем диалог и переводим пользователя к настройкам геолокации
-    private boolean explainMessage(boolean network_enabled, String msg_show_text, String action_settings) {
-        String msg = !network_enabled ? msg_show_text : null;
-        final boolean[] fl = {false};
-        if (msg != null) {
+    //сервис слушателя системных сообщений,что  вифи включен
+    BroadcastReceiver wifiStateReceiver = new BroadcastReceiver()
+    {
+        @Override
+        public void onReceive(Context c, Intent intent) {
+            //final String action = intent.getAction();
+            int wifiState = intent.getIntExtra(WifiManager.EXTRA_WIFI_STATE, WifiManager.WIFI_STATE_UNKNOWN);
+            if (wifiState == WifiManager.WIFI_STATE_ENABLED) {
+                showToast("WIFI on");
+                wifiStateEnabled=true;
+                context.unregisterReceiver(wifiStateReceiver);
+            }else if(wifiState == WifiManager.WIFI_STATE_DISABLED) {
+                showToast("WIFI OFF");
+                wifiStateEnabled=false;
+            }
+        }
+    };
+
+    //Показываем диалог и переводим пользователя к настройкам
+    private void explainMessage(String msg_show_text, String action_settings) {
+        //String msg = !network_enabled ? msg_show_text : null;
+        if (msg_show_text != null) {
             final AlertDialog.Builder builder = new AlertDialog.Builder(context);
             builder.setCancelable(false)
-                    .setMessage(msg)
+                    .setMessage(msg_show_text)
                     .setPositiveButton("Включить", new DialogInterface.OnClickListener() {
-                        public void onClick(@SuppressWarnings("unused") final DialogInterface dialog, @SuppressWarnings("unused") final int id) {
+                        public void onClick(final DialogInterface dialog, final int id) {
                             //context.startActivity(new Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS));
                             openPermissionsMenu(action_settings);
-                            fl[0] =true;
                         }
                     })
                     .setNegativeButton("Отмена",new DialogInterface.OnClickListener() {
-                        public void onClick(@SuppressWarnings("unused") final DialogInterface dialog, @SuppressWarnings("unused") final int id) {
-                            return false;
+                        public void onClick(final DialogInterface dialog, final int id) {
+
                                     }
             });
-
             final AlertDialog alert = builder.create();
             alert.show();
         }
-        return false;
     }
 
     //создадим сканер сетей
-    public void create_finder_wifi(String find_ssid)
+    public void RunScanWifi(String find_ssid)
     {
         ssid_wifi_connect=find_ssid;
+        if ((!checkWiFiServiceEnabled())||(!checkLocationServiceEnabled())) {
+            Log.i(TAG, "Check WiFi toogle or GPS toogle: false");
+            return;
+        }
 
         if (!checkPermission(Manifest.permission.CHANGE_WIFI_STATE)){//проверим разрешения
             showToast("Нет доступа к WiFi");
-
             return;}
 
         if (this.context!=null) {//еслти контекст не нулевой
@@ -203,7 +228,6 @@ public class WiFiScanner extends Activity {
             Log.i(TAG, "Scanner WiFi is created: "+wifimanager.startScan());
         }
         else Log.i(TAG, "Context application is null");
-
     }
 
     //обработка результатов сканирования
@@ -224,24 +248,26 @@ public class WiFiScanner extends Activity {
             showToast("Отсутствует разрешение местоположения");
             return;}
 
-        List<ScanResult> results = wifimanager.getScanResults();//получим результаты сканирования сетей
-        Log.i(TAG, "Find wireless networks: " + String.valueOf(results.size()));
-        for (int i =0;i<results.size();i++)
+        wifiListResult = wifimanager.getScanResults();//получим результаты сканирования сетей
+        Log.i(TAG, "Find wireless networks: " + String.valueOf(wifiListResult.size()));
+        for (int i =0;i<wifiListResult.size();i++)
         {
-            Log.i(TAG, "Wireless "+String.valueOf(i)+": "+String.valueOf(results.get(i).SSID));
-            if (results.get(i).SSID.contains(ssid_wifi_connect) ){
+            Log.i(TAG, "Wireless "+String.valueOf(i)+": "+String.valueOf(wifiListResult.get(i).SSID));
+            if (wifiListResult.get(i).SSID.contains(ssid_wifi_connect) ){
                 //если нашли эту сеть то подключаемся к ней
-                if (!status_wifi_connect) connectToWifi(results.get(i).SSID);
+                //if (!status_wifi_connect) connectToWifi(wifiListResult.get(i).SSID);
+                // вызываем метод обратного вызова
+                callback.enableConnectWifi();
             }
         }
     }
 
+    //создаём и отображаем текстовое уведомление
     private void showToast(String str_text) {
-        //создаём и отображаем текстовое уведомление
         Toast toast = Toast.makeText(context,
                 str_text,
                 Toast.LENGTH_SHORT);
-        toast.setGravity(Gravity.CENTER, 0, 0);
+        toast.setGravity(Gravity.BOTTOM, 0, 0);
         toast.show();
     }
 
@@ -253,9 +279,6 @@ public class WiFiScanner extends Activity {
             context.unregisterReceiver(wifiScanReceiver);
         }
         catch (final Exception exception) {
-            // The receiver was not registered.
-            // There is nothing to do in that case.
-            // Everything is fine.
             Log.i(TAG,"Receiver is empty? error "+exception.toString());
         }
 
@@ -264,7 +287,7 @@ public class WiFiScanner extends Activity {
             return;}
 
         try {//проверим разрешение изменениея настроек
-            if (checkSystemWritePermission(context)) {
+            if (checkSystemWritePermission()) {
                 Log.i(TAG, "Permissions SYSTEM_WRITE is True");
             }else {
                 Log.i(TAG, "Permissions SYSTEM_WRITE is false");
@@ -279,8 +302,8 @@ public class WiFiScanner extends Activity {
         NetworkRequest request = null;
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             specifier = new WifiNetworkSpecifier.Builder()
-                    .setSsid(ssid)
-                    //.setSsidPattern(new PatternMatcher(ssid, PatternMatcher.PATTERN_PREFIX))
+                    //.setSsid(ssid)
+                    .setSsidPattern(new PatternMatcher(ssid, PatternMatcher.PATTERN_PREFIX))
                     //.setBssidPattern(MacAddress.fromString("10:03:23:00:00:00"), MacAddress.fromString("ff:ff:ff:00:00:00"))
                     .build();
             request = new NetworkRequest.Builder()
@@ -304,6 +327,12 @@ public class WiFiScanner extends Activity {
                 connectivityManager.bindProcessToNetwork(network);
                 //Если успешно подключились, то сменим статус
                 status_wifi_connect=true;
+                /*
+                try {//остановим сканирование сетей
+                    context.unregisterReceiver(wifiStateReceiver);
+                } catch (final Exception exception) {
+                    Log.i(TAG,"wifiStateReceiver is empty? error "+exception.toString());}
+                */
             }
 
             @Override
@@ -323,7 +352,7 @@ public class WiFiScanner extends Activity {
         connectivityManager.unregisterNetworkCallback(networkCallback);
         Log.i(TAG, "Connection to WiFi is break");
     }
-
+/*
     public void connectToWifi2(String ssid) {
         Log.i(TAG, "Wireles connect to  " + ssid);
         if (!checkPermission(Manifest.permission.CHANGE_NETWORK_STATE)) {//проверим разрешения
@@ -371,41 +400,38 @@ public class WiFiScanner extends Activity {
             context.registerReceiver(broadcastReceiver, intentFilter);
         }
     }
-
+*/
     public void onCreate() {
-        //проверить включение
-        Log.i(TAG, "Check GPS toogle: "+checkLocationServiceEnabled());
-        Log.i(TAG, "Check WiFi toogle: "+checkWiFiServiceEnabled());
-        //checkSystemWritePermission
-        //        checkPermission
+
     }
 
     @Override
     protected void onResume(){
         super.onResume();
-        Log.i(TAG, "check");
-        showToast("check");
-
-        checkLocationServiceEnabled();
+        Log.i(TAG, "Resume");
         //context.registerReceiver(broadcastReceiver, intentFilter);
     }
 
     @Override
     public void onStart() {
         super.onStart();
-
+        Log.i(TAG, "Start");
     }
 
 
     @Override
     public void onStop() {
         super.onStop();
+        Log.i(TAG, "Stop");
         unregisterReceiver(wifiScanReceiver);
+        unregisterReceiver(wifiStateReceiver);
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        Log.i(TAG, "Destroy");
         unregisterReceiver(wifiScanReceiver);
+        unregisterReceiver(wifiStateReceiver);
     }
 }
